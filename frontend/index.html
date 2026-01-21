@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Life RPG</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div id="drawer-backdrop"></div>
+    <aside id="app-drawer">
+        <div class="drawer-header">
+            <h3>Menu</h3>
+        </div>
+        <nav class="drawer-nav">
+            <button class="nav-item active" data-target="quests">
+                <span>⚔️</span> My Quests
+            </button>
+            <button class="nav-item" data-target="studio">
+                <span>🛠️</span> Habit Studio
+            </button>
+        </nav>
+    </aside>
+
+    <header class="hero-header" id="profile-trigger">
+        <div class="user-profile">
+            <div class="avatar">🧙‍♂️</div>
+            <div class="user-stats">
+                <h1 class="username">Loading Hero...</h1>
+                <div class="level-bar-container">
+                    <div class="level-text">...</div>
+                    <div class="xp-bar"><div class="xp-fill" style="width: 0%"></div></div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <section id="view-quests">
+        <h2 class="section-title">Active Quests</h2>
+        <div id="quest-board" class="quest-grid">
+            <div class="loading">Connecting to Server...</div>
+        </div>
+        </section>
+        <section id="view-studio" style="display: none;">
+            <div class="studio-header-row">
+                <h2 class="section-title">Habit Configuration</h2>
+                <button id="btn-new-habit" class="btn-sm">+ New Habit</button>
+            </div>
+            <div id="studio-habit-list" class="habit-list">
+                </div>
+        </section>
+    </main>
+
+    <dialog id="log-modal" class="rpg-modal">
+        <form id="log-form">
+            <div class="modal-header">
+                <h3 id="modal-title">Log Quest</h3>
+                <button type="button" id="modal-close" class="btn-icon">✕</button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="log-date">Date Completed</label>
+                    <input type="date" id="log-date" required class="date-input">
+                </div>
+
+                <div class="input-group">
+                    <label id="input-label" for="log-value">Value</label>
+                    <input type="number" id="log-value" step="any" required autocomplete="off">
+                </div>
+
+                <div class="input-group">
+                    <label for="log-note">Quest Notes (Optional)</label>
+                    <textarea id="log-note" rows="2" placeholder="What did you achieve?"></textarea>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="submit" class="btn-submit">Complete Quest</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="config-modal" class="rpg-modal">
+        <form id="config-form">
+            <div class="modal-header">
+                <h3 id="config-modal-title">Edit Habit</h3>
+                <button type="button" id="config-close" class="btn-icon">✕</button>
+            </div>
+            
+            <div class="modal-body">
+                <input type="hidden" id="cfg-id"> 
+
+                <div class="input-group">
+                    <label>Habit Name</label>
+                    <input type="text" id="cfg-name" required placeholder="e.g. Morning Run">
+                </div>
+                
+                <div class="input-group">
+                    <label>Category</label>
+                    <input type="text" id="cfg-cat" placeholder="e.g. Health">
+                </div>
+
+                <div class="row-group">
+                    <div class="input-group half">
+                        <label>Type</label>
+                        <select id="cfg-metric">
+                            <option value="TIME">Time (Duration)</option>
+                            <option value="COUNT">Count (Reps)</option>
+                            <option value="MONEY">Money ($)</option>
+                            <option value="BOOL">Check (Done/Not)</option>
+                        </select>
+                    </div>
+                    <div class="input-group half">
+                        <label>Unit Label</label>
+                        <input type="text" id="cfg-unit" placeholder="e.g. Mins" required>
+                    </div>
+                </div>
+
+                <div class="row-group">
+                    <div class="input-group half">
+                        <label>XP Weight</label>
+                        <input type="number" id="cfg-xp" step="0.1" value="1.0" required>
+                    </div>
+                    <div class="input-group half">
+                        <label>Color</label>
+                        <input type="color" id="cfg-color" value="#3b82f6" class="color-input">
+                    </div>
+                </div>
+
+                <div class="input-group checkbox-group">
+                    <input type="checkbox" id="cfg-active" checked>
+                    <label for="cfg-active">Active (Visible on Board)</label>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="submit" class="btn-submit">Save Configuration</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+
+</body>
+</html>
