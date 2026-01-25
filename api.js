@@ -5,7 +5,7 @@
 
 const API_CONFIG = {
     // 🔴 INSTRUCTION: Paste your new Web App URL (ending in /exec) here
-    URL: "https://script.google.com/macros/s/AKfycbz7KlHslXP9L84E9CasPcjitXKf78g2ykPI8DcUXqgvkMN78znjiRuby03qcyybei3wnw/exec", 
+    URL: "https://script.google.com/macros/s/AKfycbyxeMb77tp5uzp0aR8_T4FvUBiUYi76z9y-SlMbE0Qbuo8D1miVQdBN3M77L-LjualJ/exec", 
     
     // Optional: Leave empty unless you implement auth later
     TOKEN: ""

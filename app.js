@@ -1,5 +1,3 @@
-
-
 // --- CONFIGURATION ---
 const CONFIG = {
     DAY_OFFSET_HOURS: 4, // A new day starts at 04:00 AM
@@ -10,7 +8,7 @@ const CONFIG = {
 let STATE = {
     view: 'quests',
     habits: [],
-    stats: {}, // { habit_id: { streak: 5, total_xp: 100... } }
+    stats: {}, // { habit_id: { streak: 5, best_streak: 10, total_xp: 100, total_volume: 50... } }
     selectedHabit: null,
     recentLogIds: new Set() // Cache to prevent double-taps
 };
@@ -26,7 +24,7 @@ async function init() {
     board.innerHTML = '<div class="loading">Loading Quests...</div>';
 
     try {
-        // Parallel Fetch using our new api.js wrappers
+        // Parallel Fetch
         const [habits, stats] = await Promise.all([
             fetchHabits(),
             getStats()
@@ -60,15 +58,25 @@ const LocalEngine = {
     },
 
     calculateOptimisticStats: function(currentStats, payload, habit) {
+        // 1. Initialize safe defaults
         const stats = { 
             streak: currentStats.streak || 0,
+            best_streak: currentStats.best_streak || 0,
             total_xp: Number(currentStats.total_xp) || 0,
+            total_volume: Number(currentStats.total_volume) || 0,
             last_log_date: currentStats.last_log_date || null
         };
 
-        const earnedXP = (parseFloat(payload.value) || 0) * parseFloat(habit.xp_multi);
+        // 2. XP & Volume Math
+        const intensity = Number(payload.intensity) || 1;
+        const val = parseFloat(payload.value) || 0;
+        
+        stats.total_volume += val;
+
+        const earnedXP = val * parseFloat(habit.xp_multi) * intensity;
         stats.total_xp += earnedXP;
 
+        // 3. Streak Math (Robust)
         const logDateObj = new Date(payload.timestamp);
         const logLogicalDate = this.getLogicalDate(logDateObj);
         
@@ -78,12 +86,22 @@ const LocalEngine = {
             const d2 = new Date(stats.last_log_date);
             const diffDays = Math.floor((d1 - d2) / msPerDay);
 
-            if (diffDays === 1) stats.streak += 1;
-            else if (diffDays > 1) stats.streak = 1;
+            if (diffDays === 1) {
+                stats.streak += 1;
+            } else if (diffDays > 1) {
+                stats.streak = 1; // Reset
+            }
+            // diffDays === 0 means same day, do nothing
         } else {
             stats.streak = 1;
         }
 
+        // 4. Update Best Streak
+        if (stats.streak > stats.best_streak) {
+            stats.best_streak = stats.streak;
+        }
+
+        // 5. Update Pointer
         if (!stats.last_log_date || logLogicalDate >= stats.last_log_date) {
             stats.last_log_date = logLogicalDate;
         }
@@ -110,6 +128,16 @@ async function submitLog() {
     const dateInput = document.getElementById('log-date');
     const submitBtn = document.querySelector('.btn-submit');
     
+    // Get Intensity (Default 1)
+    let intensity = 1;
+    const intensityInputs = document.getElementsByName('log-intensity');
+    for (const radio of intensityInputs) {
+        if (radio.checked) {
+            intensity = Number(radio.value);
+            break;
+        }
+    }
+
     const val = valueInput.value;
     if (habit.metric !== 'BOOL' && (!val || val <= 0)) {
         alert("Please enter a valid positive value.");
@@ -125,6 +153,7 @@ async function submitLog() {
 
     const selectedDate = new Date(dateInput.value);
     const now = new Date();
+    // Preserve current time on the selected date to allow "late night" logging
     selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
     
     const payload = {
@@ -133,6 +162,7 @@ async function submitLog() {
         habit_id: habit.id,
         metric: habit.metric,
         value: val,
+        intensity: intensity,
         note: noteInput.value
     };
 
@@ -177,7 +207,7 @@ function updateHeroProfile() {
 }
 
 function renderGrid(habits) {
-    // Only show Active habits on the Quest Board
+    // Only show Active habits
     habits = habits.filter(h => h.active === true);
     const board = document.getElementById('quest-board');
     board.innerHTML = '';
@@ -188,7 +218,7 @@ function renderGrid(habits) {
     }
 
     habits.forEach(habit => {
-        const stat = STATE.stats[habit.id] || { streak: 0, total_xp: 0 };
+        const stat = STATE.stats[habit.id] || { streak: 0, best_streak: 0, total_xp: 0, total_volume: 0 };
         const card = document.createElement('div');
         card.className = 'quest-card';
         card.style.borderLeft = `5px solid ${habit.color}`;
@@ -199,17 +229,23 @@ function renderGrid(habits) {
         if (habit.metric === "COUNT") icon = "🔢";
 
         const isStreakActive = stat.streak > 0;
+        
+        // --- NEW CARD LAYOUT (EFFORT FOCUSED) ---
         card.innerHTML = `
             <div class="quest-header">
                 <span class="quest-icon">${icon}</span>
-                <span class="quest-title">${habit.name}</span>
+                <div class="quest-title-block">
+                    <span class="quest-title">${habit.name}</span>
+                    <span class="quest-subtitle">Lvl ${Math.floor(Math.sqrt(stat.total_xp/100)) + 1} • ${Math.floor(stat.total_xp)} XP</span>
+                </div>
             </div>
             <div class="quest-stats">
                 <div class="stat-pill ${isStreakActive ? "streak-active" : "streak-dormant"}">
-                    ${isStreakActive ? "🔥" : "🌑"} ${stat.streak} Day Streak
+                    ${isStreakActive ? "🔥" : "🌑"} ${stat.streak} 
+                    <span class="best-streak"> / ${stat.best_streak}</span>
                 </div>
-                <div class="stat-pill xp-pill">
-                    ⭐ ${Math.floor(stat.total_xp)} XP
+                <div class="stat-pill volume-pill" style="background: ${habit.color}20; color: ${habit.color}">
+                    ${stat.total_volume} ${habit.unit}
                 </div>
             </div>
         `;
@@ -223,17 +259,54 @@ function openLogModal(habit) {
     const modal = document.getElementById('log-modal');
     const inputField = document.getElementById('log-value');
     
+    // Reset Fields
     document.getElementById('log-value').value = '';
     document.getElementById('log-note').value = '';
     document.getElementById('log-date').value = new Date().toISOString().split('T')[0];
     document.getElementById('modal-title').textContent = `Log ${habit.name}`;
     document.getElementById('modal-title').style.color = habit.color;
 
+    // Configure Input Type
     const label = document.getElementById('input-label');
     if (habit.metric === 'TIME') { label.textContent = "Duration (minutes)"; inputField.type = "number"; }
     else if (habit.metric === 'MONEY') { label.textContent = "Amount"; inputField.type = "number"; }
     else if (habit.metric === 'COUNT') { label.textContent = "Quantity"; inputField.type = "number"; }
     else { label.textContent = "Completed?"; inputField.type = "hidden"; inputField.value = "1"; }
+
+    // --- DYNAMIC INTENSITY SELECTOR ---
+    const intensityContainer = document.getElementById('intensity-group');
+    if (!intensityContainer) {
+        // Create container if missing (Safety check)
+        const newGroup = document.createElement('div');
+        newGroup.id = 'intensity-group';
+        newGroup.className = 'input-group';
+        document.querySelector('.modal-body').insertBefore(newGroup, document.querySelector('.modal-body').lastElementChild); 
+    }
+    
+    const iGroup = document.getElementById('intensity-group');
+    if (habit.metric === 'BOOL') {
+        iGroup.style.display = 'none';
+        iGroup.innerHTML = `<input type="hidden" name="log-intensity" value="1" checked>`;
+    } else {
+        iGroup.style.display = 'block';
+        iGroup.innerHTML = `
+            <label>Focus / Intensity</label>
+            <div class="intensity-selector">
+                <label class="intensity-option">
+                    <input type="radio" name="log-intensity" value="1">
+                    <span>Low (1x)</span>
+                </label>
+                <label class="intensity-option">
+                    <input type="radio" name="log-intensity" value="1.5" checked>
+                    <span>Med (1.5x)</span>
+                </label>
+                <label class="intensity-option">
+                    <input type="radio" name="log-intensity" value="2">
+                    <span>High (2x)</span>
+                </label>
+            </div>
+        `;
+    }
 
     modal.showModal();
 }
