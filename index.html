@@ -101,9 +101,23 @@
                     <input type="text" id="cfg-name" required placeholder="e.g. Morning Run">
                 </div>
                 
+                <div class="row-group">
+                    <div class="input-group half">
+                        <label>Category (Parent)</label>
+                        <input type="text" id="cfg-cat" list="dl-cats" placeholder="e.g. Health" autocomplete="off">
+                    </div>
+                    <div class="input-group half">
+                        <label>Sub-Category</label>
+                        <input type="text" id="cfg-subcat" list="dl-subcats" placeholder="e.g. Cardio" autocomplete="off">
+                    </div>
+                </div>
+
                 <div class="input-group">
-                    <label>Category</label>
-                    <input type="text" id="cfg-cat" placeholder="e.g. Health">
+                    <label>Type</label>
+                    <select id="cfg-type">
+                        <option value="Habit">Habit (Routine/Maintenance)</option>
+                        <option value="Skill">Skill (Growth/Leveling)</option>
+                    </select>
                 </div>
 
                 <div class="row-group">
@@ -144,6 +158,9 @@
             </div>
         </form>
     </dialog>
+
+    <datalist id="dl-cats"></datalist>
+    <datalist id="dl-subcats"></datalist>
 
     <script src="api.js"></script>
     <script src="app.js"></script>

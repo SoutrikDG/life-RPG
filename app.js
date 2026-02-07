@@ -79,7 +79,8 @@ const LocalEngine = {
         // 3. Streak Math (Robust)
         const logDateObj = new Date(payload.timestamp);
         const logLogicalDate = this.getLogicalDate(logDateObj);
-        
+        const todayLogicalDate = this.getLogicalDate(new Date()); // Get Today
+
         if (stats.last_log_date) {
             const msPerDay = 1000 * 60 * 60 * 24;
             const d1 = new Date(logLogicalDate);
@@ -89,11 +90,17 @@ const LocalEngine = {
             if (diffDays === 1) {
                 stats.streak += 1;
             } else if (diffDays > 1) {
-                stats.streak = 1; // Reset
+                // FIXED: Only reset streak to 1 if the log is actually for TODAY
+                if (logLogicalDate === todayLogicalDate) {
+                    stats.streak = 1; 
+                }
             }
-            // diffDays === 0 means same day, do nothing
+            // If diffDays === 0 (Same day), do nothing
         } else {
-            stats.streak = 1;
+            // First log ever: Only set streak to 1 if it is today
+            if (logLogicalDate === todayLogicalDate) {
+                stats.streak = 1;
+            }
         }
 
         // 4. Update Best Streak
@@ -230,13 +237,21 @@ function renderGrid(habits) {
 
         const isStreakActive = stat.streak > 0;
         
-        // --- NEW CARD LAYOUT (EFFORT FOCUSED) ---
+        // --- SMART UNIT CONVERSION ---
+        let displayVolume = stat.total_volume;
+        let displayUnit = habit.unit;
+
+        if (displayUnit && (displayUnit.toLowerCase() === 'mins' || displayUnit.toLowerCase() === 'minutes')) {
+            displayVolume = (displayVolume / 60).toFixed(1); 
+            displayUnit = 'Hrs';
+        }
+
+        // --- SIMPLIFIED LAYOUT (No XP/Level) ---
         card.innerHTML = `
             <div class="quest-header">
                 <span class="quest-icon">${icon}</span>
                 <div class="quest-title-block">
                     <span class="quest-title">${habit.name}</span>
-                    <span class="quest-subtitle">Lvl ${Math.floor(Math.sqrt(stat.total_xp/100)) + 1} • ${Math.floor(stat.total_xp)} XP</span>
                 </div>
             </div>
             <div class="quest-stats">
@@ -245,7 +260,7 @@ function renderGrid(habits) {
                     <span class="best-streak"> / ${stat.best_streak}</span>
                 </div>
                 <div class="stat-pill volume-pill" style="background: ${habit.color}20; color: ${habit.color}">
-                    ${stat.total_volume} ${habit.unit}
+                    ${displayVolume} ${displayUnit}
                 </div>
             </div>
         `;
@@ -258,11 +273,14 @@ function openLogModal(habit) {
     STATE.selectedHabit = habit;
     const modal = document.getElementById('log-modal');
     const inputField = document.getElementById('log-value');
-    
+    // FIX: Use Local Time instead of UTC for the default date
+    const now = new Date();
+    const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+
     // Reset Fields
     document.getElementById('log-value').value = '';
     document.getElementById('log-note').value = '';
-    document.getElementById('log-date').value = new Date().toISOString().split('T')[0];
+    document.getElementById('log-date').value = localDate;
     document.getElementById('modal-title').textContent = `Log ${habit.name}`;
     document.getElementById('modal-title').style.color = habit.color;
 
@@ -289,16 +307,17 @@ function openLogModal(habit) {
         iGroup.innerHTML = `<input type="hidden" name="log-intensity" value="1" checked>`;
     } else {
         iGroup.style.display = 'block';
+        // Updated Values: 0.5, 1, 2
         iGroup.innerHTML = `
             <label>Focus / Intensity</label>
             <div class="intensity-selector">
                 <label class="intensity-option">
-                    <input type="radio" name="log-intensity" value="1">
-                    <span>Low (1x)</span>
+                    <input type="radio" name="log-intensity" value="0.5">
+                    <span>Low (0.5x)</span>
                 </label>
                 <label class="intensity-option">
-                    <input type="radio" name="log-intensity" value="1.5" checked>
-                    <span>Med (1.5x)</span>
+                    <input type="radio" name="log-intensity" value="1" checked>
+                    <span>Normal (1x)</span>
                 </label>
                 <label class="intensity-option">
                     <input type="radio" name="log-intensity" value="2">
@@ -388,15 +407,63 @@ function renderStudio(habits) {
     });
 }
 
+function updateSuggestions() {
+    const uniqueCats = new Set();
+    const uniqueSubs = new Set();
+
+    // Scan existing habits
+    STATE.habits.forEach(h => {
+        if (h.category) uniqueCats.add(h.category);
+        if (h.sub_category) uniqueSubs.add(h.sub_category);
+    });
+
+    // --- ROBUST CATEGORY LIST ---
+    let catList = document.getElementById('dl-cats');
+    if (!catList) {
+        // If missing from HTML, create it dynamically
+        catList = document.createElement('datalist');
+        catList.id = 'dl-cats';
+        document.body.appendChild(catList);
+    }
+    catList.innerHTML = '';
+    uniqueCats.forEach(c => {
+        const option = document.createElement('option');
+        option.value = c;
+        catList.appendChild(option);
+    });
+
+    // --- ROBUST SUB-CATEGORY LIST ---
+    let subList = document.getElementById('dl-subcats');
+    if (!subList) {
+        // If missing from HTML, create it dynamically
+        subList = document.createElement('datalist');
+        subList.id = 'dl-subcats';
+        document.body.appendChild(subList);
+    }
+    subList.innerHTML = '';
+    uniqueSubs.forEach(s => {
+        const option = document.createElement('option');
+        option.value = s;
+        subList.appendChild(option);
+    });
+}
+
 function openConfigModal(habit = null) {
+    updateSuggestions();
     const form = document.getElementById('config-form');
     form.reset();
+    
     
     if (habit) {
         document.getElementById('config-modal-title').textContent = "Edit Habit";
         document.getElementById('cfg-id').value = habit.id;
         document.getElementById('cfg-name').value = habit.name;
+        
+        // Load Categories
         document.getElementById('cfg-cat').value = habit.category;
+        document.getElementById('cfg-subcat').value = habit.sub_category || ""; // New
+        document.getElementById('cfg-type').value = habit.type || "Habit";      // New
+
         document.getElementById('cfg-metric').value = habit.metric;
         document.getElementById('cfg-unit').value = habit.unit || "";
         document.getElementById('cfg-xp').value = habit.xp_multi;
@@ -406,6 +473,7 @@ function openConfigModal(habit = null) {
         document.getElementById('config-modal-title').textContent = "New Habit";
         document.getElementById('cfg-id').value = "";
         document.getElementById('cfg-color').value = "#3b82f6";
+        document.getElementById('cfg-type').value = "Habit"; // Default
     }
     document.getElementById('config-modal').showModal();
 }
@@ -420,7 +488,12 @@ async function handleConfigSubmit(e) {
     const habitData = {
         id: document.getElementById('cfg-id').value || null,
         name: document.getElementById('cfg-name').value,
+        
+        // Capture New Fields
         category: document.getElementById('cfg-cat').value,
+        sub_category: document.getElementById('cfg-subcat').value,
+        type: document.getElementById('cfg-type').value,
+
         metric: document.getElementById('cfg-metric').value,
         unit: document.getElementById('cfg-unit').value,
         xp_multi: parseFloat(document.getElementById('cfg-xp').value),
