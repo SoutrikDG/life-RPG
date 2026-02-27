@@ -48,7 +48,6 @@ async function init() {
     setupModalListeners();
 }
 
-// --- LOCAL ENGINE (THE BRAIN) ---
 const LocalEngine = {
     getLogicalDate: function(dateObj) {
         if (!dateObj) return null;
@@ -58,7 +57,6 @@ const LocalEngine = {
     },
 
     calculateOptimisticStats: function(currentStats, payload, habit) {
-        // 1. Initialize safe defaults
         const stats = { 
             streak: currentStats.streak || 0,
             best_streak: currentStats.best_streak || 0,
@@ -67,48 +65,37 @@ const LocalEngine = {
             last_log_date: currentStats.last_log_date || null
         };
 
-        // 2. XP & Volume Math
         const intensity = Number(payload.intensity) || 1;
         const val = parseFloat(payload.value) || 0;
         
         stats.total_volume += val;
-
         const earnedXP = val * parseFloat(habit.xp_multi) * intensity;
         stats.total_xp += earnedXP;
 
-        // 3. Streak Math (Robust)
-        const logDateObj = new Date(payload.timestamp);
-        const logLogicalDate = this.getLogicalDate(logDateObj);
-        const todayLogicalDate = this.getLogicalDate(new Date()); // Get Today
+        // --- FIXED: PURE STRING DATE MATH ---
+        const logLogicalDate = payload.logical_date; // Read pure string from UI
+        const todayLogicalDate = this.getLogicalDate(new Date()); // Keep 4AM rule for "Today"
 
         if (stats.last_log_date) {
             const msPerDay = 1000 * 60 * 60 * 24;
-            const d1 = new Date(logLogicalDate);
-            const d2 = new Date(stats.last_log_date);
-            const diffDays = Math.floor((d1 - d2) / msPerDay);
+            // Append T00:00:00 to force exact local date calculation
+            const d1 = new Date(logLogicalDate + "T00:00:00");
+            const d2 = new Date(stats.last_log_date + "T00:00:00");
+            const diffDays = Math.round((d1 - d2) / msPerDay);
 
             if (diffDays === 1) {
                 stats.streak += 1;
             } else if (diffDays > 1) {
-                // FIXED: Only reset streak to 1 if the log is actually for TODAY
                 if (logLogicalDate === todayLogicalDate) {
                     stats.streak = 1; 
                 }
             }
-            // If diffDays === 0 (Same day), do nothing
         } else {
-            // First log ever: Only set streak to 1 if it is today
-            if (logLogicalDate === todayLogicalDate) {
-                stats.streak = 1;
-            }
+            if (logLogicalDate === todayLogicalDate) stats.streak = 1;
         }
 
-        // 4. Update Best Streak
-        if (stats.streak > stats.best_streak) {
-            stats.best_streak = stats.streak;
-        }
+        if (stats.streak > stats.best_streak) stats.best_streak = stats.streak;
 
-        // 5. Update Pointer
         if (!stats.last_log_date || logLogicalDate >= stats.last_log_date) {
             stats.last_log_date = logLogicalDate;
         }
@@ -132,23 +119,18 @@ async function submitLog() {
 
     const valueInput = document.getElementById('log-value');
     const noteInput = document.getElementById('log-note');
-    const dateInput = document.getElementById('log-date');
+    const dateInput = document.getElementById('log-date'); // e.g., "2026-02-19"
     const submitBtn = document.querySelector('.btn-submit');
     
-    // Get Intensity (Default 1)
     let intensity = 1;
     const intensityInputs = document.getElementsByName('log-intensity');
     for (const radio of intensityInputs) {
-        if (radio.checked) {
-            intensity = Number(radio.value);
-            break;
-        }
+        if (radio.checked) { intensity = Number(radio.value); break; }
     }
 
     const val = valueInput.value;
     if (habit.metric !== 'BOOL' && (!val || val <= 0)) {
-        alert("Please enter a valid positive value.");
-        return;
+        alert("Please enter a valid positive value."); return;
     }
 
     const logId = crypto.randomUUID();
@@ -158,14 +140,15 @@ async function submitLog() {
     submitBtn.textContent = "Saving...";
     submitBtn.disabled = true;
 
+    // Preserve accurate system timestamp for history
     const selectedDate = new Date(dateInput.value);
     const now = new Date();
-    // Preserve current time on the selected date to allow "late night" logging
     selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
     
     const payload = {
         id: logId,
         timestamp: selectedDate.toISOString(),
+        logical_date: dateInput.value, // <--- NEW: THE SINGLE SOURCE OF TRUTH
         habit_id: habit.id,
         metric: habit.metric,
         value: val,
@@ -174,7 +157,6 @@ async function submitLog() {
     };
 
     try {
-        // Optimistic Update
         const currentStats = STATE.stats[habit.id] || {};
         const result = LocalEngine.calculateOptimisticStats(currentStats, payload, habit);
         
@@ -184,7 +166,6 @@ async function submitLog() {
         document.getElementById('log-modal').close();
         showToast(`Saved! +${result.earnedXP.toFixed(0)} XP`);
 
-        // Network Sync
         await postLog(payload);
         
     } catch (err) {
