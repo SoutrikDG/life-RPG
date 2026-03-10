@@ -1,6 +1,5 @@
 // --- CONFIGURATION ---
 const CONFIG = {
-    DAY_OFFSET_HOURS: 4, // A new day starts at 04:00 AM
     IDEMPOTENCY_WINDOW: 1000 * 60 * 5 // 5 Minutes
 };
 
@@ -8,9 +7,9 @@ const CONFIG = {
 let STATE = {
     view: 'quests',
     habits: [],
-    stats: {}, // { habit_id: { streak: 5, best_streak: 10, total_xp: 100, total_volume: 50... } }
+    stats: {},
     selectedHabit: null,
-    recentLogIds: new Set() // Cache to prevent double-taps
+    recentLogIds: new Set()
 };
 
 // --- INITIALIZATION ---
@@ -24,7 +23,6 @@ async function init() {
     board.innerHTML = '<div class="loading">Loading Quests...</div>';
 
     try {
-        // Parallel Fetch
         const [habits, stats] = await Promise.all([
             fetchHabits(),
             getStats()
@@ -49,11 +47,13 @@ async function init() {
 }
 
 const LocalEngine = {
-    getLogicalDate: function(dateObj) {
-        if (!dateObj) return null;
-        const d = new Date(dateObj);
-        d.setHours(d.getHours() - CONFIG.DAY_OFFSET_HOURS);
-        return d.toISOString().split('T')[0];
+    /**
+     * FIX: Plain today in YYYY-MM-DD. No 4AM offset.
+     * The user-selected date from the picker is the source of truth.
+     * This helper is only used for "is this log for today?" checks.
+     */
+    getTodayString: function() {
+        return new Date().toLocaleDateString('en-CA'); // Returns YYYY-MM-DD in local timezone
     },
 
     calculateOptimisticStats: function(currentStats, payload, habit) {
@@ -62,6 +62,7 @@ const LocalEngine = {
             best_streak: currentStats.best_streak || 0,
             total_xp: Number(currentStats.total_xp) || 0,
             total_volume: Number(currentStats.total_volume) || 0,
+            // FIX: Key name now matches server's output
             last_log_date: currentStats.last_log_date || null
         };
 
@@ -72,32 +73,33 @@ const LocalEngine = {
         const earnedXP = val * parseFloat(habit.xp_multi) * intensity;
         stats.total_xp += earnedXP;
 
-        // --- FIXED: PURE STRING DATE MATH ---
-        const logLogicalDate = payload.logical_date; // Read pure string from UI
-        const todayLogicalDate = this.getLogicalDate(new Date()); // Keep 4AM rule for "Today"
+        // The date the user picked in the UI
+        const logDate = payload.logical_date;
+        // Today's actual calendar date (no offset)
+        const today = this.getTodayString();
 
         if (stats.last_log_date) {
             const msPerDay = 1000 * 60 * 60 * 24;
-            // Append T00:00:00 to force exact local date calculation
-            const d1 = new Date(logLogicalDate + "T00:00:00");
+            const d1 = new Date(logDate + "T00:00:00");
             const d2 = new Date(stats.last_log_date + "T00:00:00");
             const diffDays = Math.round((d1 - d2) / msPerDay);
 
             if (diffDays === 1) {
-                stats.streak += 1;
+                stats.streak += 1;           // Next consecutive day
             } else if (diffDays > 1) {
-                if (logLogicalDate === todayLogicalDate) {
-                    stats.streak = 1; 
-                }
+                stats.streak = 1;            // Gap — restart at 1
             }
+            // diffDays === 0: Same day re-log — no streak change
+            // diffDays < 0: Backdated before last_log — no streak change
         } else {
-            if (logLogicalDate === todayLogicalDate) stats.streak = 1;
+            stats.streak = 1;                // First ever log
         }
 
         if (stats.streak > stats.best_streak) stats.best_streak = stats.streak;
 
-        if (!stats.last_log_date || logLogicalDate >= stats.last_log_date) {
-            stats.last_log_date = logLogicalDate;
+        // Only advance last_log_date forward
+        if (!stats.last_log_date || logDate >= stats.last_log_date) {
+            stats.last_log_date = logDate;
         }
 
         return { stats, earnedXP };
@@ -119,7 +121,7 @@ async function submitLog() {
 
     const valueInput = document.getElementById('log-value');
     const noteInput = document.getElementById('log-note');
-    const dateInput = document.getElementById('log-date'); // e.g., "2026-02-19"
+    const dateInput = document.getElementById('log-date');
     const submitBtn = document.querySelector('.btn-submit');
     
     let intensity = 1;
@@ -140,15 +142,9 @@ async function submitLog() {
     submitBtn.textContent = "Saving...";
     submitBtn.disabled = true;
 
-    // Preserve accurate system timestamp for history
-    const selectedDate = new Date(dateInput.value);
-    const now = new Date();
-    selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
-    
     const payload = {
         id: logId,
-        timestamp: selectedDate.toISOString(),
-        logical_date: dateInput.value, // <--- NEW: THE SINGLE SOURCE OF TRUTH
+        logical_date: dateInput.value,    // THE SINGLE SOURCE OF TRUTH
         habit_id: habit.id,
         metric: habit.metric,
         value: val,
@@ -195,7 +191,6 @@ function updateHeroProfile() {
 }
 
 function renderGrid(habits) {
-    // Only show Active habits
     habits = habits.filter(h => h.active === true);
     const board = document.getElementById('quest-board');
     board.innerHTML = '';
@@ -218,7 +213,6 @@ function renderGrid(habits) {
 
         const isStreakActive = stat.streak > 0;
         
-        // --- SMART UNIT CONVERSION ---
         let displayVolume = stat.total_volume;
         let displayUnit = habit.unit;
 
@@ -227,7 +221,6 @@ function renderGrid(habits) {
             displayUnit = 'Hrs';
         }
 
-        // --- SIMPLIFIED LAYOUT (No XP/Level) ---
         card.innerHTML = `
             <div class="quest-header">
                 <span class="quest-icon">${icon}</span>
@@ -254,9 +247,9 @@ function openLogModal(habit) {
     STATE.selectedHabit = habit;
     const modal = document.getElementById('log-modal');
     const inputField = document.getElementById('log-value');
-    // FIX: Use Local Time instead of UTC for the default date
-    const now = new Date();
-    const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+
+    // FIX: Simpler, reliable local date
+    const localDate = new Date().toLocaleDateString('en-CA');
 
     // Reset Fields
     document.getElementById('log-value').value = '';
@@ -275,7 +268,6 @@ function openLogModal(habit) {
     // --- DYNAMIC INTENSITY SELECTOR ---
     const intensityContainer = document.getElementById('intensity-group');
     if (!intensityContainer) {
-        // Create container if missing (Safety check)
         const newGroup = document.createElement('div');
         newGroup.id = 'intensity-group';
         newGroup.className = 'input-group';
@@ -288,7 +280,6 @@ function openLogModal(habit) {
         iGroup.innerHTML = `<input type="hidden" name="log-intensity" value="1" checked>`;
     } else {
         iGroup.style.display = 'block';
-        // Updated Values: 0.5, 1, 2
         iGroup.innerHTML = `
             <label>Focus / Intensity</label>
             <div class="intensity-selector">
@@ -392,16 +383,13 @@ function updateSuggestions() {
     const uniqueCats = new Set();
     const uniqueSubs = new Set();
 
-    // Scan existing habits
     STATE.habits.forEach(h => {
         if (h.category) uniqueCats.add(h.category);
         if (h.sub_category) uniqueSubs.add(h.sub_category);
     });
 
-    // --- ROBUST CATEGORY LIST ---
     let catList = document.getElementById('dl-cats');
     if (!catList) {
-        // If missing from HTML, create it dynamically
         catList = document.createElement('datalist');
         catList.id = 'dl-cats';
         document.body.appendChild(catList);
@@ -413,10 +401,8 @@ function updateSuggestions() {
         catList.appendChild(option);
     });
 
-    // --- ROBUST SUB-CATEGORY LIST ---
     let subList = document.getElementById('dl-subcats');
     if (!subList) {
-        // If missing from HTML, create it dynamically
         subList = document.createElement('datalist');
         subList.id = 'dl-subcats';
         document.body.appendChild(subList);
@@ -434,17 +420,13 @@ function openConfigModal(habit = null) {
     const form = document.getElementById('config-form');
     form.reset();
     
-    
     if (habit) {
         document.getElementById('config-modal-title').textContent = "Edit Habit";
         document.getElementById('cfg-id').value = habit.id;
         document.getElementById('cfg-name').value = habit.name;
-        
-        // Load Categories
         document.getElementById('cfg-cat').value = habit.category;
-        document.getElementById('cfg-subcat').value = habit.sub_category || ""; // New
-        document.getElementById('cfg-type').value = habit.type || "Habit";      // New
-
+        document.getElementById('cfg-subcat').value = habit.sub_category || "";
+        document.getElementById('cfg-type').value = habit.type || "Habit";
         document.getElementById('cfg-metric').value = habit.metric;
         document.getElementById('cfg-unit').value = habit.unit || "";
         document.getElementById('cfg-xp').value = habit.xp_multi;
@@ -454,7 +436,7 @@ function openConfigModal(habit = null) {
         document.getElementById('config-modal-title').textContent = "New Habit";
         document.getElementById('cfg-id').value = "";
         document.getElementById('cfg-color').value = "#3b82f6";
-        document.getElementById('cfg-type').value = "Habit"; // Default
+        document.getElementById('cfg-type').value = "Habit";
     }
     document.getElementById('config-modal').showModal();
 }
@@ -469,12 +451,9 @@ async function handleConfigSubmit(e) {
     const habitData = {
         id: document.getElementById('cfg-id').value || null,
         name: document.getElementById('cfg-name').value,
-        
-        // Capture New Fields
         category: document.getElementById('cfg-cat').value,
         sub_category: document.getElementById('cfg-subcat').value,
         type: document.getElementById('cfg-type').value,
-
         metric: document.getElementById('cfg-metric').value,
         unit: document.getElementById('cfg-unit').value,
         xp_multi: parseFloat(document.getElementById('cfg-xp').value),
