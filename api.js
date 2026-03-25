@@ -4,16 +4,10 @@
  */
 
 const API_CONFIG = {
-    // 🔴 INSTRUCTION: Paste your new Web App URL (ending in /exec) here
-    URL: "https://script.google.com/macros/s/AKfycbwx_hNqCFqa3PvoVMN28dt2bxMNpif2pbNNG9iEkoP1waMbRvqSEmtiQ5CLZHWBlBcK8A/exec", 
-    
-    // Optional: Leave empty unless you implement auth later
+    URL: "https://script.google.com/macros/s/AKfycbyF7tzmP2a58IybRurOTtnn_flqzyb8oZQY32HI2mzTdJxjcfRl6ghnJBYzrou0I22tfQ/exec",
     TOKEN: ""
 };
 
-/**
- * HELPER: Centralized Fetcher for GET requests
- */
 async function fetchData(action) {
     try {
         const url = `${API_CONFIG.URL}?action=${action}`;
@@ -26,19 +20,12 @@ async function fetchData(action) {
     }
 }
 
-/**
- * HELPER: Centralized Sender for POST requests
- * Note: Uses 'no-cors' mode because Google redirects POSTs. 
- * We assume success if the network call doesn't fail.
- */
 async function sendPost(payload) {
     try {
-        // Inject Auth Token if it exists
         if (API_CONFIG.TOKEN) payload.auth_token = API_CONFIG.TOKEN;
-
         await fetch(API_CONFIG.URL, {
             method: "POST",
-            mode: "no-cors", 
+            mode: "no-cors",
             headers: { "Content-Type": "text/plain;charset=utf-8" },
             body: JSON.stringify(payload)
         });
@@ -49,28 +36,31 @@ async function sendPost(payload) {
     }
 }
 
-/* =========================================
-   PUBLIC WRAPPERS (Used by app.js)
-   ========================================= */
+// --- PUBLIC API ---
 
-// 1. Fetch Habits
+async function fetchCategories() {
+    const data = await fetchData("GET_CATEGORIES");
+    return data ? data.categories : [];
+}
+
 async function fetchHabits() {
     const data = await fetchData("GET_HABITS");
     return data ? data.habits : [];
 }
 
-// 2. Fetch Stats
 async function getStats() {
     const data = await fetchData("GET_STATS");
-    return data ? data.stats : {};
+    return data ? data.stats : { category_stats: {}, habit_stats: {} };
 }
 
-// 3. Save Habit (Create/Edit)
+async function saveCategory(categoryData) {
+    return sendPost({ action: "SAVE_CATEGORY", ...categoryData });
+}
+
 async function saveHabit(habitData) {
     return sendPost({ action: "SAVE_HABIT", ...habitData });
 }
 
-// 4. Log Activity
 async function postLog(data) {
     return sendPost({ action: "LOG", ...data });
 }
