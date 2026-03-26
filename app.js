@@ -486,22 +486,21 @@ async function submitTimeLog(e) {
 
     closeLogSheet();
 
-    if (isToday) {
-        logPromise.catch(err => console.error('Log sync error:', err));
-    } else {
-        // no-cors fetch resolves only after the full HTTP round-trip, so by the time
-        // logPromise settles the Apps Script has already written the row to the sheet.
-        // Pull fresh stats immediately after — no timeout needed.
-        logPromise
-            .then(async () => {
-                const freshStats = await getStats();
-                if (freshStats && Object.keys(freshStats.category_stats || {}).length > 0) {
-                    STATE.stats = freshStats;
-                    saveToCache();
-                    renderAll();
-                }
-            })
-            .catch(err => console.error('Log sync error:', err));
+    logPromise.catch(err => console.error('Log sync error:', err));
+
+    if (!isToday) {
+        // Apps Script needs time to process the write before we read back.
+        // We try at 4 s and again at 9 s as a safety net.
+        const refreshFromServer = async () => {
+            const freshStats = await getStats();
+            if (freshStats && Object.keys(freshStats.category_stats || {}).length > 0) {
+                STATE.stats = freshStats;
+                saveToCache();
+                renderAll();
+            }
+        };
+        setTimeout(refreshFromServer, 4000);
+        setTimeout(refreshFromServer, 9000);
     }
 }
 
