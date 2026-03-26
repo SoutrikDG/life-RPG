@@ -479,6 +479,7 @@ async function submitTimeLog(e) {
         habit_id: habitId,
         metric: habit?.metric || 'TIME',
         value,
+        xp_multi: habit?.xp_multi || 1,
         note,
         secondary_value: secVal || '',
         secondary_unit: secVal ? (habit?.secondary_unit || '') : ''
@@ -489,8 +490,6 @@ async function submitTimeLog(e) {
     logPromise.catch(err => console.error('Log sync error:', err));
 
     if (!isToday) {
-        // Apps Script needs time to process the write before we read back.
-        // We try at 4 s and again at 9 s as a safety net.
         const refreshFromServer = async () => {
             const freshStats = await getStats();
             if (freshStats && Object.keys(freshStats.category_stats || {}).length > 0) {
@@ -499,8 +498,11 @@ async function submitTimeLog(e) {
                 renderAll();
             }
         };
-        setTimeout(refreshFromServer, 4000);
-        setTimeout(refreshFromServer, 9000);
+        // Primary: no-cors fetch resolves after the full HTTP round-trip,
+        // meaning Apps Script has already written to the sheet.
+        logPromise.then(refreshFromServer).catch(() => {});
+        // Safety net: covers Apps Script cold starts (can take 10-15 s).
+        setTimeout(refreshFromServer, 8000);
     }
 }
 
