@@ -749,18 +749,22 @@ function renderSkillLog() {
         `;
 
         habits.forEach(h => {
-            const hs      = STATE.stats.habit_stats?.[h.id] || {};
-            const rawVol  = Number(hs.total_volume) || 0;
-            const secVol  = Number(hs.total_secondary) || 0;
+            const hs       = STATE.stats.habit_stats?.[h.id] || {};
+            const rawVol   = Number(hs.total_volume) || 0;
+            const secVol   = Number(hs.total_secondary) || 0;
+            const totalXP  = Number(hs.total_xp) || 0;
+            const logCount = Number(hs.log_count) || 0;
 
-            // FIX #3: Determine how to display volume based on unit type
-            let volLabel = formatVolumeLabel(rawVol, h.unit, h.metric);
+            // Primary volume label
+            const primaryLabel = formatVolumeLabel(rawVol, h.unit, h.metric);
 
-            // Add secondary metric if applicable
+            // Secondary volume label (if applicable)
+            let secondaryLabel = '';
             if (h.has_secondary_metric && h.secondary_unit && secVol > 0) {
-                volLabel += ` · ${Number(secVol).toFixed(1)} ${h.secondary_unit}`;
+                secondaryLabel = `${Number(secVol).toFixed(1)} ${h.secondary_unit}`;
             }
 
+            // Last logged
             const lastDate    = hs.last_log_date || null;
             const daysAgo     = lastDate ? daysBetween(lastDate, today) : null;
             const lastLabel   = daysAgo === null ? 'never' : daysAgo === 0 ? 'today' : daysAgo === 1 ? '1d ago' : `${daysAgo}d ago`;
@@ -769,11 +773,26 @@ function renderSkillLog() {
             const isInactive  = !cat.active;
             const item = document.createElement('div');
             item.className = `skill-log-item ${isInactive ? 'tappable' : ''}`;
+
+            // Build stat chips
+            let statsHTML = `<span class="skill-log-stat-chip">${primaryLabel}</span>`;
+            if (secondaryLabel) {
+                statsHTML += `<span class="skill-log-stat-chip secondary">${secondaryLabel}</span>`;
+            }
+            if (logCount > 0) {
+                statsHTML += `<span class="skill-log-stat-chip sessions">${logCount} session${logCount !== 1 ? 's' : ''}</span>`;
+            }
+            if (totalXP > 0) {
+                statsHTML += `<span class="skill-log-stat-chip xp">⚡ ${Math.round(totalXP)} XP</span>`;
+            }
+
             item.innerHTML = `
-                <span class="skill-log-item-name">${h.name}</span>
-                <div class="skill-log-item-stats">
-                    <span class="skill-log-volume">${volLabel}</span>
+                <div class="skill-log-item-left">
+                    <span class="skill-log-item-name">${h.name}</span>
                     <span class="last-logged ${coldClass}">last: ${lastLabel}</span>
+                </div>
+                <div class="skill-log-item-stats-grid">
+                    ${statsHTML}
                 </div>
             `;
 
