@@ -473,8 +473,8 @@ async function submitTimeLog(e) {
     // Store last-used contributor
     localStorage.setItem(`lastContributor_${cat.id}`, habitId);
 
-    // Fire-and-forget POST
-    postLog({
+    // POST — capture the promise so we can chain off it for backdated logs
+    const logPromise = postLog({
         id: logId,
         logical_date: date,
         habit_id: habitId,
@@ -483,25 +483,26 @@ async function submitTimeLog(e) {
         note,
         secondary_value: secVal || '',
         secondary_unit: secVal ? (habit?.secondary_unit || '') : ''
-    }).catch(err => console.error('Log sync error:', err));
+    });
 
     closeLogSheet();
 
-    // For backdated logs: the server recalculates streak from Activity_DB history.
-    // Wait for the Apps Script write to complete, then pull fresh stats.
-    if (!isToday) {
-        setTimeout(async () => {
-            try {
+    if (isToday) {
+        logPromise.catch(err => console.error('Log sync error:', err));
+    } else {
+        // no-cors fetch resolves only after the full HTTP round-trip, so by the time
+        // logPromise settles the Apps Script has already written the row to the sheet.
+        // Pull fresh stats immediately after — no timeout needed.
+        logPromise
+            .then(async () => {
                 const freshStats = await getStats();
-                if (freshStats) {
+                if (freshStats && Object.keys(freshStats.category_stats || {}).length > 0) {
                     STATE.stats = freshStats;
                     saveToCache();
                     renderAll();
                 }
-            } catch (err) {
-                console.error('Stats refresh error:', err);
-            }
-        }, 2500);
+            })
+            .catch(err => console.error('Log sync error:', err));
     }
 }
 
