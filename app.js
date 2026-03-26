@@ -457,13 +457,12 @@ async function submitTimeLog(e) {
         STATE.stats.category_stats[cat.id] = cs;
     }
 
-    // XP toast — only meaningful for today (historical logs don't affect today's progress bar)
-    if (isToday) {
-        const pct = Math.min(120, (cs.today_logged_mins || 0) / (cat.target_minutes || 1) * 100);
+    // XP toast
+    {
+        const mins = isToday ? (cs.today_logged_mins || 0) : value;
+        const pct  = Math.min(120, mins / (cat.target_minutes || 1) * 100);
         const xpEarned = Math.round((pct / 100) * (cat.xp_weight || 1) * CONFIG.BASE_XP_PER_CATEGORY);
         showToast(`+${xpEarned} XP`);
-    } else {
-        showToast('Logged ✓ Refreshing streak...');
     }
 
     // Re-render only the affected tile

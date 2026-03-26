@@ -10,7 +10,7 @@ const API_CONFIG = {
 
 async function fetchData(action) {
     try {
-        const url = `${API_CONFIG.URL}?action=${action}`;
+        const url = `${API_CONFIG.URL}?action=${action}&_t=${Date.now()}`;
         const response = await fetch(url);
         const data = await response.json();
         return data;
