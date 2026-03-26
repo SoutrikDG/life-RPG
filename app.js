@@ -1,5 +1,5 @@
 // ============================================================
-// LIFE RPG v2.0 — app.js
+// LIFE RPG v2.0 — app.js (FIXED)
 // ============================================================
 
 const CONFIG = {
@@ -16,6 +16,7 @@ let STATE = {
     stats: { category_stats: {}, habit_stats: {} },
     selectedCategory: null,
     boolChecked: {},        // { habitId: true } — in-session BOOL toggles
+    boolUnchecked: {},      // FIX #5: track in-session un-checks to override server state
     recentLogIds: new Set()
 };
 
@@ -49,6 +50,7 @@ async function init() {
         STATE.habits     = habits     || [];
         STATE.stats      = stats      || { category_stats: {}, habit_stats: {} };
         STATE.boolChecked = {};
+        STATE.boolUnchecked = {};
         renderAll();
         saveToCache();
     } catch (err) {
@@ -81,27 +83,8 @@ function getRankTitle(level) {
 }
 
 function updateHeroProfile() {
-    // XP from category progress (TIME) and BOOL completions today
+    // Use raw habit_stats sum as primary XP source
     let totalXP = 0;
-
-    STATE.categories.forEach(cat => {
-        const cs = STATE.stats.category_stats?.[cat.id];
-        if (!cs) return;
-        if (cat.metric_type === 'TIME') {
-            const pct = cat.target_minutes > 0
-                ? Math.min(120, (cs.today_logged_mins || 0) / cat.target_minutes * 100)
-                : 0;
-            totalXP += (pct / 100) * (cat.xp_weight || 1) * CONFIG.BASE_XP_PER_CATEGORY;
-        }
-        // Historical XP from habit_stats
-        const catHabits = getCategoryHabits(cat.id);
-        catHabits.forEach(h => {
-            const hs = STATE.stats.habit_stats?.[h.id];
-            totalXP += hs?.total_xp || 0;
-        });
-    });
-    // De-dupe: use raw habit_stats sum as primary source
-    totalXP = 0;
     Object.values(STATE.stats.habit_stats || {}).forEach(hs => {
         totalXP += Number(hs.total_xp) || 0;
     });
@@ -296,6 +279,20 @@ function renderBoolTile(cat, cs, catHabits) {
         });
     });
 
+    // FIX #2: Long-press or dedicated button for backdated BOOL logging
+    // We add a small "📅" date button that opens a date-pick modal
+    const dateBtn = document.createElement('button');
+    dateBtn.className = 'tile-expand-toggle';
+    dateBtn.type = 'button';
+    dateBtn.textContent = '📅';
+    dateBtn.title = 'Log for a past date';
+    dateBtn.style.fontSize = '0.8rem';
+    dateBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        openBoolDateModal(cat, catHabits);
+    });
+    el.querySelector('.category-tile-footer').appendChild(dateBtn);
+
     return el;
 }
 
@@ -395,6 +392,14 @@ function applyContributorDefaults() {
 
     document.getElementById('sheet-unit-label').textContent = habit.unit || 'mins';
 
+    // FIX #8 / #3: Update duration label based on habit's unit
+    const durationLabel = document.getElementById('sheet-duration-label');
+    if (habit.unit) {
+        durationLabel.textContent = `Value (${habit.unit})`;
+    } else {
+        durationLabel.textContent = 'Duration';
+    }
+
     const secGroup = document.getElementById('sheet-secondary-group');
     if (habit.has_secondary_metric && habit.secondary_unit) {
         document.getElementById('sheet-secondary-label').textContent = habit.secondary_unit;
@@ -425,16 +430,19 @@ async function submitTimeLog(e) {
     const date    = document.getElementById('sheet-date').value;
     const secVal  = parseFloat(document.getElementById('sheet-secondary-value').value) || null;
 
-    if (!value || value <= 0) { showToast('Enter a valid duration.'); return; }
+    if (!value || value <= 0) { showToast('Enter a valid value.'); return; }
     if (note.length < 3)      { showToast('Add a note (min 3 chars).'); return; }
 
     const logId = crypto.randomUUID();
     if (STATE.recentLogIds.has(logId)) return;
     STATE.recentLogIds.add(logId);
 
-    // --- Optimistic update ---
-    const cs = STATE.stats.category_stats[cat.id] || {};
     const isToday = date === getToday();
+
+    // --- Optimistic update ---
+    // FIX #1: Apply optimistic updates for ALL dates (not just today)
+    const cs = STATE.stats.category_stats[cat.id] || {};
+
     if (isToday) {
         cs.today_logged_mins = (cs.today_logged_mins || 0) + value;
         if (!cs.today_contributors) cs.today_contributors = {};
@@ -444,9 +452,10 @@ async function submitTimeLog(e) {
         const target    = cat.target_minutes || 1;
         const threshold = cat.min_threshold_pct || 60;
         const newPct    = cs.today_logged_mins / target * 100;
-        if (newPct >= threshold && (newPct - value / target * 100) < threshold) {
+        const oldPct    = (cs.today_logged_mins - value) / target * 100;
+        if (newPct >= threshold && oldPct < threshold) {
             cs.streak = (cs.streak || 0) + 1;
-            if ((cs.streak) > (cs.best_streak || 0)) cs.best_streak = cs.streak;
+            if (cs.streak > (cs.best_streak || 0)) cs.best_streak = cs.streak;
         }
 
         // Update last_7_days for today
@@ -457,29 +466,34 @@ async function submitTimeLog(e) {
         STATE.stats.category_stats[cat.id] = cs;
     }
 
-    // XP toast
-    {
-        const mins = isToday ? (cs.today_logged_mins || 0) : value;
-        const pct  = Math.min(120, mins / (cat.target_minutes || 1) * 100);
-        const xpEarned = Math.round((pct / 100) * (cat.xp_weight || 1) * CONFIG.BASE_XP_PER_CATEGORY);
-        showToast(`+${xpEarned} XP`);
-    }
+    // Update per-habit stats optimistically
+    const hs = STATE.stats.habit_stats[habitId] || { total_volume: 0, total_secondary: 0, total_xp: 0, last_log_date: null };
+    hs.total_volume += value;
+    if (secVal) hs.total_secondary = (hs.total_secondary || 0) + secVal;
+    hs.total_xp += value * (habit?.xp_multi || 1);
+    if (!hs.last_log_date || date >= hs.last_log_date) hs.last_log_date = date;
+    STATE.stats.habit_stats[habitId] = hs;
 
-    // Re-render only the affected tile
-    rerenderTile(cat);
+    // XP toast
+    const xpEarned = Math.round(value * (habit?.xp_multi || 1));
+    showToast(`+${xpEarned} XP`);
+
+    // Re-render
+    if (isToday) {
+        rerenderTile(cat);
+    }
     updateHeroProfile();
 
     // Store last-used contributor
     localStorage.setItem(`lastContributor_${cat.id}`, habitId);
 
-    // POST — capture the promise so we can chain off it for backdated logs
+    // POST to server
     const logPromise = postLog({
         id: logId,
         logical_date: date,
         habit_id: habitId,
         metric: habit?.metric || 'TIME',
         value,
-        xp_multi: habit?.xp_multi || 1,
         note,
         secondary_value: secVal || '',
         secondary_unit: secVal ? (habit?.secondary_unit || '') : ''
@@ -489,34 +503,51 @@ async function submitTimeLog(e) {
 
     logPromise.catch(err => console.error('Log sync error:', err));
 
-    if (!isToday) {
-        const refreshFromServer = async () => {
+    // FIX #1: For non-today logs, schedule a server refresh to update
+    // streaks and heat strips. Use longer delays to account for Apps Script
+    // cold start + write time. Also refresh for today to sync streak state.
+    const refreshFromServer = async () => {
+        try {
             const freshStats = await getStats();
             if (freshStats && Object.keys(freshStats.category_stats || {}).length > 0) {
                 STATE.stats = freshStats;
                 saveToCache();
                 renderAll();
             }
-        };
-        // Primary: no-cors fetch resolves after the full HTTP round-trip,
-        // meaning Apps Script has already written to the sheet.
-        logPromise.then(refreshFromServer).catch(() => {});
-        // Safety net: covers Apps Script cold starts (can take 10-15 s).
-        setTimeout(refreshFromServer, 8000);
+        } catch (err) {
+            console.error('Refresh error:', err);
+        }
+    };
+
+    if (!isToday) {
+        // Backdated log — must refresh from server since we can't
+        // accurately compute streak/heat-strip changes client-side
+        setTimeout(refreshFromServer, 5000);
+        setTimeout(refreshFromServer, 12000);
+        setTimeout(refreshFromServer, 20000);  // Third attempt as safety net
+    } else {
+        // Even for today, do a background refresh to sync server state
+        setTimeout(refreshFromServer, 6000);
     }
 }
 
 // ============================================================
 // BOOL TOGGLE
+// FIX #2: Add date-picker modal for backdated BOOL logging
+// FIX #5: Track un-checks properly with boolUnchecked map
 // ============================================================
 
 function toggleBoolContributor(habitId, catId) {
     const alreadyDone = isCheckedToday(habitId);
     if (alreadyDone) {
-        // Undo (in-session only)
+        // FIX #5: Mark as unchecked in session.
+        // Note: The server-side log still exists. This undo is session-only.
+        // On next page refresh, the server state will be authoritative.
         delete STATE.boolChecked[habitId];
+        STATE.boolUnchecked[habitId] = true;
     } else {
         STATE.boolChecked[habitId] = true;
+        delete STATE.boolUnchecked[habitId];
         const cat = STATE.categories.find(c => c.id === catId);
 
         const logId = crypto.randomUUID();
@@ -535,9 +566,11 @@ function toggleBoolContributor(habitId, catId) {
 
         if (cat) {
             const cs  = STATE.stats.category_stats[catId] || {};
-            const nowComplete = isCategoryComplete(cat, cs);
-            if (nowComplete) {
-                const xp = Math.round((cat.xp_weight || 1) * CONFIG.BOOL_XP_PER_COMPLETION);
+            const contributors = getCategoryHabits(catId).filter(h => h.active);
+            const checkedCount = contributors.filter(h => isCheckedToday(h.id)).length;
+            // Check if ALL are now done (for XP toast)
+            if (checkedCount === contributors.length && contributors.length > 0) {
+                const xp = Math.round((cat.xp_weight || 1) * CONFIG.BOOL_XP_PER_COMPLETION * contributors.length);
                 showToast(`+${xp} XP`);
             }
         }
@@ -548,9 +581,122 @@ function toggleBoolContributor(habitId, catId) {
 }
 
 function isCheckedToday(habitId) {
+    // FIX #5: If explicitly unchecked this session, treat as unchecked
+    if (STATE.boolUnchecked[habitId]) return false;
     if (STATE.boolChecked[habitId]) return true;
     const hs = STATE.stats.habit_stats?.[habitId];
     return hs?.last_log_date === getToday();
+}
+
+// FIX #2: Backdated BOOL logging modal
+function openBoolDateModal(cat, catHabits) {
+    // Reuse the skill-log-modal for simplicity, but configure it for BOOL
+    const modal = document.getElementById('skill-log-modal');
+    const form  = document.getElementById('skill-log-form');
+
+    document.getElementById('skill-log-modal-title').textContent = `Log ${cat.name} (Past Date)`;
+
+    // Hide value field (BOOL = always 1)
+    document.getElementById('skill-log-value').value = '1';
+    document.getElementById('skill-log-value').closest('.input-group').style.display = 'none';
+
+    // Hide secondary
+    document.getElementById('skill-log-secondary-group').style.display = 'none';
+
+    // Show date
+    document.getElementById('skill-log-date').value = getToday();
+
+    // Notes optional
+    document.getElementById('skill-log-note').value = '';
+
+    // Build a checklist inside the modal body for contributor selection
+    let checklistContainer = document.getElementById('bool-date-checklist');
+    if (!checklistContainer) {
+        checklistContainer = document.createElement('div');
+        checklistContainer.id = 'bool-date-checklist';
+        checklistContainer.style.marginBottom = '14px';
+        const modalBody = modal.querySelector('.modal-body');
+        modalBody.insertBefore(checklistContainer, modalBody.firstChild.nextSibling);
+    }
+    checklistContainer.style.display = '';
+    checklistContainer.innerHTML = `
+        <label style="display:block;margin-bottom:5px;font-size:0.8rem;color:var(--text-secondary);">
+            Select contributors completed
+        </label>
+        ${catHabits.map(h => `
+            <label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;">
+                <input type="checkbox" value="${h.id}" checked
+                       style="width:18px;height:18px;accent-color:var(--accent-primary);">
+                <span style="font-size:0.9rem;">${h.name}</span>
+            </label>
+        `).join('')}
+    `;
+
+    // Override form submit for BOOL backdated logging
+    form.onsubmit = async (e) => {
+        e.preventDefault();
+        const date = document.getElementById('skill-log-date').value;
+        const note = document.getElementById('skill-log-note').value.trim();
+        const selectedHabits = Array.from(
+            checklistContainer.querySelectorAll('input[type="checkbox"]:checked')
+        ).map(cb => cb.value);
+
+        if (selectedHabits.length === 0) {
+            showToast('Select at least one contributor.');
+            return;
+        }
+
+        const btn = form.querySelector('.btn-submit');
+        btn.disabled = true;
+
+        try {
+            for (const hId of selectedHabits) {
+                const logId = crypto.randomUUID();
+                await postLog({
+                    id: logId,
+                    logical_date: date,
+                    habit_id: hId,
+                    metric: 'BOOL',
+                    value: 1,
+                    note: note,
+                    secondary_value: '',
+                    secondary_unit: ''
+                });
+            }
+
+            showToast(`Logged ${selectedHabits.length} item(s) for ${date}`);
+            modal.close();
+
+            // Refresh from server after delay
+            setTimeout(async () => {
+                try {
+                    const freshStats = await getStats();
+                    if (freshStats) {
+                        STATE.stats = freshStats;
+                        saveToCache();
+                        renderAll();
+                    }
+                } catch (err) { console.error(err); }
+            }, 5000);
+            setTimeout(async () => {
+                try {
+                    const freshStats = await getStats();
+                    if (freshStats) {
+                        STATE.stats = freshStats;
+                        saveToCache();
+                        renderAll();
+                    }
+                } catch (err) { console.error(err); }
+            }, 12000);
+        } catch (err) {
+            console.error('BOOL date log error:', err);
+            showToast('Failed to log.');
+        } finally {
+            btn.disabled = false;
+        }
+    };
+
+    modal.showModal();
 }
 
 function rerenderTile(cat) {
@@ -570,6 +716,9 @@ function rerenderTile(cat) {
 
 // ============================================================
 // SKILL LOG PAGE
+// FIX #3: Display volume using the habit's own unit, not always
+// converting to hours. Only convert to hours for TIME/mins-based
+// habits.
 // ============================================================
 
 let skillLogSelectedHabit = null;
@@ -601,18 +750,20 @@ function renderSkillLog() {
 
         habits.forEach(h => {
             const hs      = STATE.stats.habit_stats?.[h.id] || {};
-            const volMins = Number(hs.total_volume) || 0;
-            const volHrs  = (volMins / 60).toFixed(1);
+            const rawVol  = Number(hs.total_volume) || 0;
             const secVol  = Number(hs.total_secondary) || 0;
 
-            let volLabel = `${volHrs} Hrs`;
+            // FIX #3: Determine how to display volume based on unit type
+            let volLabel = formatVolumeLabel(rawVol, h.unit, h.metric);
+
+            // Add secondary metric if applicable
             if (h.has_secondary_metric && h.secondary_unit && secVol > 0) {
                 volLabel += ` · ${Number(secVol).toFixed(1)} ${h.secondary_unit}`;
             }
 
             const lastDate    = hs.last_log_date || null;
             const daysAgo     = lastDate ? daysBetween(lastDate, today) : null;
-            const lastLabel   = daysAgo === null ? 'never' : daysAgo === 0 ? 'today' : `${daysAgo}d ago`;
+            const lastLabel   = daysAgo === null ? 'never' : daysAgo === 0 ? 'today' : daysAgo === 1 ? '1d ago' : `${daysAgo}d ago`;
             const coldClass   = daysAgo !== null && daysAgo >= 15 ? 'cold' : '';
 
             const isInactive  = !cat.active;
@@ -637,11 +788,46 @@ function renderSkillLog() {
     });
 }
 
+/**
+ * FIX #3: Smart volume label formatting.
+ * - For TIME metrics with mins/minutes unit → convert to hours
+ * - For BOOL metrics → show as "X days"
+ * - For everything else (Km, Pages, etc.) → show raw value with unit
+ */
+function formatVolumeLabel(rawVolume, unit, metric) {
+    if (!unit) unit = '';
+    const unitLower = unit.toLowerCase();
+
+    if (metric === 'BOOL') {
+        return `${Number(rawVolume).toFixed(0)} day(s)`;
+    }
+
+    // Time-based: convert minutes to hours
+    if (unitLower === 'mins' || unitLower === 'minutes' || unitLower === 'min') {
+        const hrs = (rawVolume / 60).toFixed(1);
+        return `${hrs} Hrs`;
+    }
+
+    // Everything else: show raw value with unit, apply toFixed(1) to avoid floating point
+    return `${Number(rawVolume).toFixed(1)} ${unit}`;
+}
+
 function openSkillLogModal(habit) {
     skillLogSelectedHabit = habit;
+
+    // Reset the form's onsubmit to default skill log behavior
+    document.getElementById('skill-log-form').onsubmit = submitSkillLog;
+
+    // Show value field (may have been hidden by BOOL date modal)
+    document.getElementById('skill-log-value').closest('.input-group').style.display = '';
+
+    // Hide BOOL checklist if it exists from previous usage
+    const boolChecklist = document.getElementById('bool-date-checklist');
+    if (boolChecklist) boolChecklist.style.display = 'none';
+
     document.getElementById('skill-log-modal-title').textContent = `Log ${habit.name}`;
     document.getElementById('skill-log-value-label').textContent =
-        habit.metric === 'TIME' ? `Duration (${habit.unit || 'mins'})` : habit.unit || 'Value';
+        habit.metric === 'TIME' ? `Duration (${habit.unit || 'mins'})` : `Value (${habit.unit || ''})`;
     document.getElementById('skill-log-unit-label').textContent = habit.unit || '';
     document.getElementById('skill-log-value').value = '';
     document.getElementById('skill-log-date').value  = getToday();
@@ -688,6 +874,7 @@ async function submitSkillLog(e) {
         showToast(`Logged ${habit.name}`);
         document.getElementById('skill-log-modal').close();
         renderSkillLog();
+        updateHeroProfile();
 
         await postLog({
             id: logId,
@@ -708,6 +895,7 @@ async function submitSkillLog(e) {
 
 // ============================================================
 // STUDIO
+// FIX #6: Preserve existing xp_multi instead of hardcoding 1
 // ============================================================
 
 function renderStudioCategories() {
@@ -749,7 +937,8 @@ function renderStudioHabits() {
             h.metric,
             h.unit,
             h.default_value != null ? `Default: ${h.default_value}` : null,
-            h.has_secondary_metric ? `+${h.secondary_unit}` : null
+            h.has_secondary_metric ? `+${h.secondary_unit}` : null,
+            `XP: ${h.xp_multi || 1}x`
         ].filter(Boolean).join(' · ');
 
         const item = document.createElement('div');
@@ -814,7 +1003,6 @@ async function handleCategoryConfigSubmit(e) {
 
     try {
         await saveCategory(catData);
-        // Update local state immediately
         const idx = STATE.categories.findIndex(c => c.id === id);
         if (idx >= 0) STATE.categories[idx] = catData;
         else STATE.categories.push(catData);
@@ -845,6 +1033,12 @@ function openHabitConfigModal(habit = null) {
     document.getElementById('cfg-secondary-unit-group').style.display = habit?.has_secondary_metric ? '' : 'none';
     document.getElementById('cfg-habit-active').checked      = isNew ? true : !!habit?.active;
 
+    // FIX #6: Show XP multiplier field and preserve existing value
+    let xpInput = document.getElementById('cfg-habit-xp-multi');
+    if (xpInput) {
+        xpInput.value = habit?.xp_multi || 1;
+    }
+
     // Populate category dropdown
     const catSelect = document.getElementById('cfg-habit-category');
     catSelect.innerHTML = '<option value="">— select category —</option>';
@@ -868,6 +1062,17 @@ async function handleHabitConfigSubmit(e) {
     const catId = document.getElementById('cfg-habit-category').value;
     const cat   = STATE.categories.find(c => c.id === catId);
 
+    // FIX #6: Read XP multi from the form, or preserve existing value
+    let xpMulti = 1;
+    const xpInput = document.getElementById('cfg-habit-xp-multi');
+    if (xpInput) {
+        xpMulti = Number(xpInput.value) || 1;
+    } else {
+        // Fallback: preserve existing value from state
+        const existingHabit = STATE.habits.find(h => h.id === id);
+        xpMulti = existingHabit?.xp_multi || 1;
+    }
+
     const habitData = {
         id,
         name:                 document.getElementById('cfg-habit-name').value.trim(),
@@ -881,7 +1086,7 @@ async function handleHabitConfigSubmit(e) {
         has_secondary_metric: document.getElementById('cfg-habit-secondary').checked,
         secondary_unit:       document.getElementById('cfg-habit-secondary-unit').value.trim(),
         active:               document.getElementById('cfg-habit-active').checked,
-        xp_multi:             1
+        xp_multi:             xpMulti   // FIX #6: Use actual value, not hardcoded 1
     };
 
     try {

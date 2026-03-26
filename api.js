@@ -4,7 +4,7 @@
  */
 
 const API_CONFIG = {
-    URL: "https://script.google.com/macros/s/AKfycbx7Goelm0G_risx8K5ZRUk4CUIGicc0y0zDiUpgNIWzcqm-zsapOh0d6EIOp13nLa9roA/exec",
+    URL: "https://script.google.com/macros/s/AKfycbz-3EWsifDX4n0UkohO5ZqjeC8rpOjB3XPCy-WkVVbgXhfOAaP0104ZsFseKzJ9qWqEUQ/exec",
     TOKEN: ""
 };
 

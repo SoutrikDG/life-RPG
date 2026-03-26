@@ -91,7 +91,7 @@
                 <div class="input-group">
                     <label id="sheet-duration-label">Duration</label>
                     <div class="input-with-unit">
-                        <input type="number" id="sheet-value" step="any" min="1" autocomplete="off" placeholder="30">
+                        <input type="number" id="sheet-value" step="any" min="0.1" autocomplete="off" placeholder="30">
                         <span id="sheet-unit-label" class="unit-label">mins</span>
                     </div>
                 </div>
@@ -199,6 +199,7 @@
     </dialog>
 
     <!-- HABIT CONFIG MODAL -->
+    <!-- FIX #6: Added XP Multiplier field -->
     <dialog id="habit-config-modal" class="rpg-modal">
         <form id="habit-config-form">
             <div class="modal-header">
@@ -236,9 +237,13 @@
                         <input type="number" id="cfg-habit-default" step="any" placeholder="30">
                     </div>
                     <div class="input-group half">
-                        <label>Color</label>
-                        <input type="color" id="cfg-habit-color" value="#3b82f6" class="color-input">
+                        <label>XP Multiplier</label>
+                        <input type="number" id="cfg-habit-xp-multi" step="0.1" value="1" min="0.1">
                     </div>
+                </div>
+                <div class="input-group">
+                    <label>Color</label>
+                    <input type="color" id="cfg-habit-color" value="#3b82f6" class="color-input">
                 </div>
                 <div class="input-group checkbox-group">
                     <input type="checkbox" id="cfg-habit-secondary">
@@ -259,7 +264,7 @@
         </form>
     </dialog>
 
-    <!-- SKILL LOG MODAL (inactive category logging) -->
+    <!-- SKILL LOG MODAL (inactive category logging + BOOL backdated logging) -->
     <dialog id="skill-log-modal" class="rpg-modal">
         <form id="skill-log-form">
             <div class="modal-header">
