@@ -774,25 +774,29 @@ function renderSkillLog() {
             const item = document.createElement('div');
             item.className = `skill-log-item ${isInactive ? 'tappable' : ''}`;
 
-            // Build stat chips
-            let statsHTML = `<span class="skill-log-stat-chip">${primaryLabel}</span>`;
+            // Build the right-side stats as clean stacked lines
+            let line1 = primaryLabel;
             if (secondaryLabel) {
-                statsHTML += `<span class="skill-log-stat-chip secondary">${secondaryLabel}</span>`;
+                line1 += ` · ${secondaryLabel}`;
             }
+
+            let line2Parts = [];
             if (logCount > 0) {
-                statsHTML += `<span class="skill-log-stat-chip sessions">${logCount} session${logCount !== 1 ? 's' : ''}</span>`;
+                line2Parts.push(`${logCount} session${logCount !== 1 ? 's' : ''}`);
             }
             if (totalXP > 0) {
-                statsHTML += `<span class="skill-log-stat-chip xp">⚡ ${Math.round(totalXP)} XP</span>`;
+                line2Parts.push(`${Math.round(totalXP)} XP`);
             }
+            const line2 = line2Parts.join(' · ');
 
             item.innerHTML = `
                 <div class="skill-log-item-left">
                     <span class="skill-log-item-name">${h.name}</span>
                     <span class="last-logged ${coldClass}">last: ${lastLabel}</span>
                 </div>
-                <div class="skill-log-item-stats-grid">
-                    ${statsHTML}
+                <div class="skill-log-item-right">
+                    <span class="skill-log-primary-line">${line1}</span>
+                    ${line2 ? `<span class="skill-log-secondary-line">${line2}</span>` : ''}
                 </div>
             `;
 
