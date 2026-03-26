@@ -457,14 +457,18 @@ async function submitTimeLog(e) {
         STATE.stats.category_stats[cat.id] = cs;
     }
 
-    // XP toast
-    const pct = Math.min(120, (cs.today_logged_mins || 0) / (cat.target_minutes || 1) * 100);
-    const xpEarned = Math.round((pct / 100) * (cat.xp_weight || 1) * CONFIG.BASE_XP_PER_CATEGORY);
+    // XP toast — only meaningful for today (historical logs don't affect today's progress bar)
+    if (isToday) {
+        const pct = Math.min(120, (cs.today_logged_mins || 0) / (cat.target_minutes || 1) * 100);
+        const xpEarned = Math.round((pct / 100) * (cat.xp_weight || 1) * CONFIG.BASE_XP_PER_CATEGORY);
+        showToast(`+${xpEarned} XP`);
+    } else {
+        showToast('Logged ✓ Refreshing streak...');
+    }
 
     // Re-render only the affected tile
     rerenderTile(cat);
     updateHeroProfile();
-    showToast(`+${xpEarned} XP`);
 
     // Store last-used contributor
     localStorage.setItem(`lastContributor_${cat.id}`, habitId);
@@ -482,6 +486,23 @@ async function submitTimeLog(e) {
     }).catch(err => console.error('Log sync error:', err));
 
     closeLogSheet();
+
+    // For backdated logs: the server recalculates streak from Activity_DB history.
+    // Wait for the Apps Script write to complete, then pull fresh stats.
+    if (!isToday) {
+        setTimeout(async () => {
+            try {
+                const freshStats = await getStats();
+                if (freshStats) {
+                    STATE.stats = freshStats;
+                    saveToCache();
+                    renderAll();
+                }
+            } catch (err) {
+                console.error('Stats refresh error:', err);
+            }
+        }, 2500);
+    }
 }
 
 // ============================================================
